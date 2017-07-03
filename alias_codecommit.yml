@@ -1,0 +1,68 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Defines an SSL Certificate, CF Distribution, and Route 53 domain name setup to map a custom domain to the CodeCommit domain.
+Parameters:
+  DomainName:
+    Type: String
+    Description: The domain of the website being defined.
+    AllowedPattern: ^([a-zA-Z]{1}[a-zA-Z0-9\-]{0,63}\.)+([a-zA-Z]{2,6})$
+    ConstraintDescription: Must be a valid domain name.
+  HostedZone:
+    Type: String
+    Description: The name of the Route53 hosted zone.
+    AllowedPattern: ^([a-zA-Z]{1}[a-zA-Z0-9\-]{0,63}\.)+([a-zA-Z]{2,6})\.$
+    ConstraintDescription: Must be a valid hosted zone name.
+Resources:
+  SSLCertificate:
+    Type: "AWS::CertificateManager::Certificate"
+    Properties: 
+      DomainName: !Ref DomainName
+  GitDistribution:
+    Type: "AWS::CloudFront::Distribution"  
+    Properties: 
+      DistributionConfig:
+        Enabled: true
+        Aliases:
+          - !Ref DomainName
+        Comment: !Ref DomainName
+        DefaultCacheBehavior:
+          TargetOriginId: !Sub
+            - "CodeCommit-${DomainName}"
+            - DomainName: !Ref DomainName
+          AllowedMethods: ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+          DefaultTTL: 0
+          MaxTTL: 0
+          MinTTL: 0
+          ViewerProtocolPolicy: redirect-to-https
+          ForwardedValues:
+            Headers: ["*"]
+            QueryString: true
+          Compress: true
+        Origins:
+          - Id: !Sub
+              - "CodeCommit-${DomainName}"
+              - DomainName: !Ref DomainName
+            DomainName: git-codecommit.us-east-1.amazonaws.com
+            OriginPath: /v1/repos
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1
+                - TLSv1.1
+                - TLSv1.2
+        PriceClass: PriceClass_100
+        HttpVersion: http2
+        ViewerCertificate:
+          AcmCertificateArn: !Ref SSLCertificate
+          MinimumProtocolVersion: TLSv1
+          SslSupportMethod: sni-only
+  DNSEntries:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      Comment: Map DNS Name to CF resources.
+      HostedZoneName: !Ref HostedZone
+      RecordSets:
+      - Name: !Ref DomainName
+        Type: CNAME
+        ResourceRecords:
+          - !GetAtt GitDistribution.DomainName
+        TTL: '3600'
